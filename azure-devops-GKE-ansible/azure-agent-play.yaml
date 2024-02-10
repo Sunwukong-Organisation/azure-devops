@@ -1,0 +1,8 @@
+- hosts: azurestack-build
+  roles:
+     - yohanb.azure_devops_agent
+  vars:
+    - az_devops_agent_role: build
+    - az_devops_accountname: harshal0812
+    - az_devops_accesstoken: ACCESS_TOKEN_FROM_AZURE
+    - az_devops_project_name: PROJECT_NAME

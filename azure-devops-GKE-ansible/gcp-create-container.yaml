@@ -1,0 +1,26 @@
+- name: Create GKE CLUSTER 
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    service_account_email: azuredevops@azurestack.iam.gserviceaccount.com
+    credentials_file: /root/gce_play/sa.json
+    project_id: azurestack
+    machine_type: n1-standard-1
+    image: ubuntu-1604-lts
+
+  tasks:
+    
+    - name: create a cluster
+      gcp_container_cluster:
+          name: "dev-cluster"
+          initial_node_count: 2
+          node_config:
+            machine_type: n1-standard-2
+            disk_size_gb: 20
+          zone: us-central1-a
+          project: "{{ project_id }}"
+          auth_kind: "serviceaccount"
+          service_account_file: "{{ credentials_file }}"
+          state: absent

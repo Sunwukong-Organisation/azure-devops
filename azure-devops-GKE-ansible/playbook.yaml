@@ -1,0 +1,113 @@
+- name: Create instance(s)
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars:
+    service_account_email: azuredevops@azurestack.iam.gserviceaccount.com
+    credentials_file: /root/gce_play/token2.json
+    project_id: azurestack
+    machine_type: n1-standard-1
+    image: ubuntu-1604-lts
+
+  tasks:
+  - name: Temporary decrypt tokens
+    block:
+      - name: Start Decryptiong token file
+        command: ansible-vault decrypt /root/gce_play/token2.json
+    rescue:
+      - name: Possibly decrypted token - Engaging Encryption to secure 
+        command: ansible-vault encrypt "{{ credentials_file }}" 
+      
+  - name: Disk Creation
+    block:
+      - name: Creating GCP boot disk
+        gce_pd:
+          credentials_file: "{{ credentials_file }}"
+          project_id: "{{ project_id }}"
+          service_account_email: "{{ service_account_email }}"
+          zone: "us-east1-b"
+          name: "{{ project_id }}-disk"
+          disk_type: pd-ssd
+          image: ubuntu-1604-xenial-v20190306
+          size_gb: 20
+          state: present
+          mode: READ_WRITE
+    rescue: 
+      - name: The task possibly Failed. Reinstating encryption 
+        command: ansible-vault encrypt "{{ credentials_file }}"
+      - name: Exiting Playbook 
+        command: /bin/false
+
+  - name: Network Creation
+    block:
+      - name: Create custom SubNetwork
+        gce_net:
+          name: privatenet
+          mode: custom
+          subnet_name: "{{ project_id }}-subnet"
+          subnet_region: "us-east1"
+          ipv4_range: '10.10.0.0/16'
+          credentials_file: "{{ credentials_file }}"
+          service_account_email: "{{ service_account_email }}"
+          project_id: "{{ project_id }}"
+          allowed: "tcp:22,80-31000"
+          src_range: ["0.0.0.0/0"]
+          state: present
+          fwname: "allow-tcp"
+    rescue:
+      - name: The task possibly Failed. Reinstating encryption
+        command: ansible-vault encrypt "{{ credentials_file }}"
+      - name: Exiting Playbook
+        command: /bin/false
+
+  - name: GCP Instance Creation
+    block: 
+      - name: Create GCP instance for Azure Builds
+        gce: 
+          instance_names: "{{ project_id }}-build"
+          machine_type: "{{ machine_type }}"
+          state: present
+          image_family: "ubuntu-1604-lts"
+          service_account_email: "{{ service_account_email }}"
+          credentials_file: "{{ credentials_file }}"
+          project_id: "{{ project_id }}"
+          tags:
+            - build-instance
+          disk_auto_delete: true
+          disks:
+            - "{{ project_id }}-disk"
+          service_account_permissions:
+            - storage-full
+            - https://www.googleapis.com/auth/ndev.clouddns.readwrite
+            - logging-write
+            - useraccounts-rw
+            - taskqueue
+          zone: "us-east1-b"
+          metadata:
+           ssh-keys: |-
+                  teamjoomla09:ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQChP2I9Ke9v+QknBLPQE47YpIG4jiIbKVKSjhrY3qxoczKqD68BBcS+uDDtRsSXuxgVxNx3B2GuD2zG7znGZp9ib34CvXbiVReHIZVfZG4nNtyyoM+mDv/fidYg+aF9JhZ/fJDhAay+HBpxH+DNIh+/APOo/KHhg7J9szHbx17WwSd2bbvWrnTDC/jji/KEVfM4E/sJhIgC4umlErqNLN30HmGt4bqk7nYhRLGDmIG0tevPSnJ5uk4jGUqYqWYp8p2JoJPBQXf/tAIVjE2TAzNngeFHQi5KnLat3iYrncT2zuCmNS1A3Zh+yeXFEog8hOuVVyKEPDTonGSGwzvWXsex teamjoomla09
+                  root:ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQChP2I9Ke9v+QknBLPQE47YpIG4jiIbKVKSjhrY3qxoczKqD68BBcS+uDDtRsSXuxgVxNx3B2GuD2zG7znGZp9ib34CvXbiVReHIZVfZG4nNtyyoM+mDv/fidYg+aF9JhZ/fJDhAay+HBpxH+DNIh+/APOo/KHhg7J9szHbx17WwSd2bbvWrnTDC/jji/KEVfM4E/sJhIgC4umlErqNLN30HmGt4bqk7nYhRLGDmIG0tevPSnJ5uk4jGUqYqWYp8p2JoJPBQXf/tAIVjE2TAzNngeFHQi5KnLat3iYrncT2zuCmNS1A3Zh+yeXFEog8hOuVVyKEPDTonGSGwzvWXsex teamjoomla09
+        register: gce
+    rescue:
+      - name: The task possibly Failed. Reinstating encryption
+        command: ansible-vault encrypt "{{ credentials_file }}"
+      - name: Exiting Playbook
+        command: /bin/false
+
+  - add_host:
+      hostname: "{{ item.public_ip }}"
+      groupname: build_instance_ips
+    with_items: "{{ gce.instance_data }}"
+
+  - name: Wait for instance to respond to SSH
+    wait_for:
+      delay: 1
+      host: "{{ item.public_ip }}"
+      port: 22
+      state: started
+      timeout: 120
+    with_items: "{{ gce.instance_data }}"
+
+  - name: Encrypt token
+    command: ansible-vault encrypt /root/gce_play/token2.json
